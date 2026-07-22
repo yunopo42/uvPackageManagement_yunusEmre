@@ -1,0 +1,6 @@
+[
+  {"id": 1, "ad": "Laptop", "kategori": "Teknoloji", "fiyat": 25000},
+  {"id": 2, "ad": "Kitap", "kategori": "Kırtasiye", "fiyat": 150},
+  {"id": 3, "ad": "Kablosuz Fare", "kategori": "Teknoloji", "fiyat": 450},
+  {"id": 4, "ad": "Defter", "kategori": "Kırtasiye", "fiyat": 50}
+]

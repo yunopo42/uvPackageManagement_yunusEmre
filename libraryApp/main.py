@@ -133,3 +133,16 @@ for image in book.images:
     print(image.url)
     print(image.book.title)
 
+
+from database.connections import DATABASE_PATH , get_connection
+
+connection = get_connection()
+cursor = connection.execute("SELECT sqlite_version()")
+
+row = cursor.fetchone()
+print("Veri tabanı Path : " + str(DATABASE_PATH))
+print("Bağlantı Başarılı")
+print("SQLite sürümü : " , row[0])
+
+connection.close()
+print("Bağlantı Kapatıldı")

@@ -13,7 +13,7 @@ class IRepository(ABC , Generic[T]):
         pass
 
     @abstractmethod
-    def add(self , entity : T):
+    def add(self , entity : T) -> T:
         pass
 
     @abstractmethod

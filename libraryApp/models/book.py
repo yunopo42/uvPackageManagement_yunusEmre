@@ -43,7 +43,7 @@ class Book(AuditModel):
         self.images = (list(images) if images is not None else[])
 
         self.publication_year = publication_year
-        self.edicition=edition
+        self.edition=edition
         self.page_count = page_count
         self.language = language
         self.format = format

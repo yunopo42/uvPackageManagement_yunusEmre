@@ -7,10 +7,10 @@ class AuditModel:
             created_by : str,
             id : str | None = None,
             created_at : datetime | None = None,
-            updated_at : str | None = None,
+            updated_at : datetime | None = None,
             updated_by : str | None = None,
             is_deleted : bool =False,
-            deleted_at : str | None = None,
+            deleted_at : datetime | None = None,
             row_version : int = 1):
         self.id = id  if id is not None else str(uuid4())
         self.created_at = created_at if created_at is not None else datetime.now(timezone.utc)

@@ -4,7 +4,12 @@ from models.category import Category
 from models.bookImage import BookImage
 from models.book import Book
 from datetime import date
+from database.initializer import initialize_database
 
+
+#DB Kurulumu
+initialize_database()
+print("DB Kurulumu Başarılı")
 publisher = Publisher(
     name="Can Yayınları",
     slug="can-yayinlari" ,
@@ -133,16 +138,30 @@ for image in book.images:
     print(image.url)
     print(image.book.title)
 
-
+#database test
 from database.connections import DATABASE_PATH , get_connection
-
 connection = get_connection()
-cursor = connection.execute("SELECT sqlite_version()")
-
-row = cursor.fetchone()
-print("Veri tabanı Path : " + str(DATABASE_PATH))
-print("Bağlantı Başarılı")
-print("SQLite sürümü : " , row[0])
-
+cursor = connection.execute(
+    """
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'publishers'
+    """
+)
+table = cursor.fetchone()
+if table is not None:
+    print("Tablo bulundu: " , table["name"])
+else:
+    print("Publishers tablosu bulunamadı")
 connection.close()
-print("Bağlantı Kapatıldı")
+
+# connection = get_connection()
+# cursor = connection.execute("SELECT sqlite_version()")
+
+# row = cursor.fetchone()
+# print("Veri tabanı Path : " + str(DATABASE_PATH))
+# print("Bağlantı Başarılı")
+# print("SQLite sürümü : " , row[0])
+
+# connection.close()
+# print("Bağlantı Kapatıldı")

@@ -1,167 +1,162 @@
-from models.publisher import Publisher
-from models.author import Author
-from models.category import Category
-from models.bookImage import BookImage
-from models.book import Book
-from datetime import date
+from uuid import uuid4
+
+from database.connections import get_connection
 from database.initializer import initialize_database
+from models.publisher import Publisher
+from repositories.publisher_repository import PublisherRepository
 
 
-#DB Kurulumu
-initialize_database()
-print("DB Kurulumu Başarılı")
-publisher = Publisher(
-    name="Can Yayınları",
-    slug="can-yayinlari" ,
-    created_by="Yunus Emre Atmaz",
-    founded_year=2005,
-    city="Konya",
-    email="canyayinlari@gmail.com",
-    phone="+90 212 000 00 00",
-    website="https://www.canyayinlari.com",
-    logo_url="https://example.com/can-yayinlari.png"
-)
+def create_test_publisher() -> Publisher:
+    test_suffix = uuid4().hex[:8]
 
-print("********Publisher Test********")
-print(publisher.name)
-print(publisher.slug)
-print(publisher.is_active)
-print(publisher.id)
+    return Publisher(
+        name="Iletisim Yayinlari",
+        slug=f"iletisim-yayinlari-{test_suffix}",
+        created_by="Yunus Emre Atmaz",
+        founded_year=1982,
+        city="Istanbul",
+        country="Turkiye",
+        is_active=True
+    )
 
 
+def verify_with_raw_sql(publisher_id: str) -> None:
+    connection = get_connection()
 
-author = Author(
-    full_name="George Orwell",
-    slug="george-orwell",
-    created_by="Yunus Emre Atmaz",
-    nationality="İngiliz",
-    birth_date=date(1903, 6, 25),
-    death_date=date(1950, 1, 21),
-    biography="İngiliz romancı, gazeteci ve eleştirmen.",
-    website=None,
-    is_active=True
-)
+    try:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                name,
+                slug,
+                city,
+                updated_by,
+                updated_at,
+                row_version,
+                is_deleted,
+                deleted_at,
+                is_active
+            FROM publishers
+            WHERE id = ?
+            """,
+            (publisher_id,)
+        ).fetchone()
+    finally:
+        connection.close()
 
-print("\n*********Author Test*********")
-print(author.full_name)
-print(author.id)
-print(author.created_by)
-print(author.created_at)
-print(author.slug)
-print(author.is_active)
+    print("\n--- Ham SQL dogrulamasi ---")
 
+    if row is None:
+        print("Kayit bulunamadi.")
+        return
 
-books = Category(
-    name = "Kitaplar",
-    slug= "kitaplar",
-    created_by="Yunus Emre Atmaz",
-    description= "Tüm kitap kategorileri",
-    display_order=1
-)
-print("\n*********Category Test*********")
-print(books.parent)
-
-#bir alt level
-novel = Category(
-    name = "Roman",
-    slug = "roman",
-    created_by="Yunus Emre Atmaz",
-    parent=books, #ilk create ettiğim kategori
-    description="Roman türündeki kitaplar",
-    display_order=2
-)
-print(novel.name)
-print(novel.parent.name)
-
-#novelin alt leveli
-science_fiction = Category(
-    name="Bilim Kurgu",
-    slug="bilim-kurgu",
-    created_by="Yunus Emre Atmaz",
-    parent=novel
-)
-
-print(science_fiction.name)
-print(science_fiction.parent.name)
+    print("ID:", row["id"])
+    print("Ad:", row["name"])
+    print("Slug:", row["slug"])
+    print("Sehir:", row["city"])
+    print("Guncelleyen:", row["updated_by"])
+    print("Guncellenme zamani:", row["updated_at"])
+    print("Row version:", row["row_version"])
+    print("Silinmis mi:", bool(row["is_deleted"]))
+    print("Silinme zamani:", row["deleted_at"])
+    print("Aktif mi:", bool(row["is_active"]))
 
 
-image = BookImage(
-    url = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTxpxPxvUTotQgmb-szX871R6z6bBp2JF8NcVKgaY1OcA&s=10",
-    created_by="Yunus Emre Atmaz",
-    alt_text="1984 Kitap Kapağı",
-    is_cover=True,
-    sort_order=1
-)
-print("\n*********Category Test*********")
-print(image.url)
-print(image.created_by)
-print(image.created_at)
-print(image.alt_text)
-print(image.is_cover)
-print(image.sort_order)
+def main() -> None:
+    initialize_database()
+    print("Veritabani hazir.")
+
+    repository = PublisherRepository()
+
+    # CREATE
+    publisher = create_test_publisher()
+    added_publisher = repository.add(publisher)
+
+    print("\n--- add() testi ---")
+    print("ID:", added_publisher.id)
+    print("Ad:", added_publisher.name)
+
+    # READ ONE
+    found_publisher = repository.get_by_id(added_publisher.id)
+
+    print("\n--- get_by_id() testi ---")
+
+    if found_publisher is None:
+        raise RuntimeError("Eklenen Publisher geri okunamadi.")
+
+    print("ID:", found_publisher.id)
+    print("Ad:", found_publisher.name)
+    print("Slug:", found_publisher.slug)
+
+    missing_publisher = repository.get_by_id("olmayan-id")
+    print("Olmayan kayit sonucu:", missing_publisher)
+
+    # READ ALL
+    all_publishers = repository.get_all()
+
+    print("\n--- get_all() testi ---")
+    print("Aktif Publisher sayisi:", len(all_publishers))
+
+    for current_publisher in all_publishers:
+        print(
+            current_publisher.id,
+            current_publisher.name,
+            current_publisher.row_version
+        )
+
+    # UPDATE
+    old_version = found_publisher.row_version
+    found_publisher.name = "Iletisim Yayinlari Guncel"
+    found_publisher.city = "Ankara"
+    found_publisher.updated_by = "Yunus Emre Atmaz"
+
+    updated_publisher = repository.update(found_publisher)
+
+    print("\n--- update() testi ---")
+    print("Ad:", updated_publisher.name)
+    print("Sehir:", updated_publisher.city)
+    print("Guncelleyen:", updated_publisher.updated_by)
+    print("Eski version:", old_version)
+    print("Yeni version:", updated_publisher.row_version)
+    print("Guncellenme zamani:", updated_publisher.updated_at)
+
+    # UPDATE SONRASI TEKRAR OKUMA
+    publisher_after_update = repository.get_by_id(
+        updated_publisher.id
+    )
+
+    print("\n--- update sonrasi get_by_id() testi ---")
+
+    if publisher_after_update is None:
+        raise RuntimeError("Guncellenen Publisher geri okunamadi.")
+
+    print("DB adi:", publisher_after_update.name)
+    print("DB sehri:", publisher_after_update.city)
+    print("DB version:", publisher_after_update.row_version)
+
+    verify_with_raw_sql(updated_publisher.id)
+
+    # SOFT DELETE
+    count_before_delete = len(repository.get_all())
+    delete_result = repository.delete(updated_publisher.id)
+    count_after_delete = len(repository.get_all())
+    publisher_after_delete = repository.get_by_id(
+        updated_publisher.id
+    )
+    second_delete_result = repository.delete(
+        updated_publisher.id
+    )
+
+    print("\n--- delete() testi ---")
+    print("Silme sonucu:", delete_result)
+    print("Silmeden once aktif kayit:", count_before_delete)
+    print("Silmeden sonra aktif kayit:", count_after_delete)
+    print("get_by_id sonucu:", publisher_after_delete)
+    print("Ikinci silme sonucu:", second_delete_result)
+
+    verify_with_raw_sql(updated_publisher.id)
 
 
-
-book = Book(
-    title="1984",
-    slug="1984",
-    subtitle="Bin Dokuz Yüz Seksen Dört",
-    isbn="9789750718533",
-    author=author,
-    publisher=publisher,
-    created_by="Admin",
-    categories=[novel, science_fiction],
-    publication_year=1949,
-    edition=1,
-    page_count=352,
-    language="Türkçe",
-    format="Ciltsiz",
-    price=180.0,
-    currency="TRY",
-    stock=25,
-    status="active",
-    rating=4.8,
-    summary="Totaliter bir geleceği konu alan distopik roman.",
-    images=[image]
-)
-
-
-
-print(book.title)
-print(book.author.full_name)
-print(book.publisher.name)
-
-for category in book.categories:
-    print(category.name)
-
-for image in book.images:
-    print(image.url)
-    print(image.book.title)
-
-#database test
-from database.connections import DATABASE_PATH , get_connection
-connection = get_connection()
-cursor = connection.execute(
-    """
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table' AND name = 'publishers'
-    """
-)
-table = cursor.fetchone()
-if table is not None:
-    print("Tablo bulundu: " , table["name"])
-else:
-    print("Publishers tablosu bulunamadı")
-connection.close()
-
-# connection = get_connection()
-# cursor = connection.execute("SELECT sqlite_version()")
-
-# row = cursor.fetchone()
-# print("Veri tabanı Path : " + str(DATABASE_PATH))
-# print("Bağlantı Başarılı")
-# print("SQLite sürümü : " , row[0])
-
-# connection.close()
-# print("Bağlantı Kapatıldı")
+if __name__ == "__main__":
+    main()

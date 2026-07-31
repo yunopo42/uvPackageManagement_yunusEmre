@@ -1,6 +1,6 @@
 from database.initializer import initialize_database
+from database.unit_of_work import UnitOfWork
 from models.publisher import Publisher
-from repositories.publisher_repository import PublisherRepository
 
 
 def read_optional_text(label: str) -> str | None:
@@ -21,8 +21,8 @@ def print_publisher(publisher: Publisher) -> None:
     print("Row version:", publisher.row_version)
 
 
-def list_publishers(repository: PublisherRepository) -> None:
-    publishers = repository.get_all()
+def list_publishers(uow: UnitOfWork) -> None:
+    publishers = uow.publishers.get_all()
 
     if not publishers:
         print("\nKayitli aktif Publisher bulunamadi.")
@@ -34,9 +34,9 @@ def list_publishers(repository: PublisherRepository) -> None:
         print_publisher(publisher)
 
 
-def get_publisher(repository: PublisherRepository) -> None:
+def get_publisher(uow: UnitOfWork) -> None:
     entity_id = input("Publisher ID: ").strip()
-    publisher = repository.get_by_id(entity_id)
+    publisher = uow.publishers.get_by_id(entity_id)
 
     if publisher is None:
         print("Publisher bulunamadi.")
@@ -45,7 +45,7 @@ def get_publisher(repository: PublisherRepository) -> None:
     print_publisher(publisher)
 
 
-def add_publisher(repository: PublisherRepository) -> None:
+def add_publisher(uow: UnitOfWork) -> None:
     print("\nBos birakilamayan alanlar: ad, slug, olusturan")
 
     name = input("Ad: ").strip()
@@ -83,8 +83,10 @@ def add_publisher(repository: PublisherRepository) -> None:
     )
 
     try:
-        added_publisher = repository.add(publisher)
+        added_publisher = uow.publishers.add(publisher)
+        uow.commit()
     except Exception as error:
+        # commit'e ulasilamadigi icin UnitOfWork cikista rollback yapacak.
         print("Publisher eklenemedi:", error)
         return
 
@@ -92,9 +94,9 @@ def add_publisher(repository: PublisherRepository) -> None:
     print_publisher(added_publisher)
 
 
-def update_publisher(repository: PublisherRepository) -> None:
+def update_publisher(uow: UnitOfWork) -> None:
     entity_id = input("Guncellenecek Publisher ID: ").strip()
-    publisher = repository.get_by_id(entity_id)
+    publisher = uow.publishers.get_by_id(entity_id)
 
     if publisher is None:
         print("Publisher bulunamadi.")
@@ -127,7 +129,8 @@ def update_publisher(repository: PublisherRepository) -> None:
     publisher.updated_by = updated_by
 
     try:
-        updated_publisher = repository.update(publisher)
+        updated_publisher = uow.publishers.update(publisher)
+        uow.commit()
     except Exception as error:
         print("Publisher guncellenemedi:", error)
         return
@@ -136,9 +139,9 @@ def update_publisher(repository: PublisherRepository) -> None:
     print_publisher(updated_publisher)
 
 
-def delete_publisher(repository: PublisherRepository) -> None:
+def delete_publisher(uow: UnitOfWork) -> None:
     entity_id = input("Silinecek Publisher ID: ").strip()
-    publisher = repository.get_by_id(entity_id)
+    publisher = uow.publishers.get_by_id(entity_id)
 
     if publisher is None:
         print("Publisher bulunamadi.")
@@ -153,9 +156,10 @@ def delete_publisher(repository: PublisherRepository) -> None:
         print("Silme islemi iptal edildi.")
         return
 
-    deleted = repository.delete(entity_id)
+    deleted = uow.publishers.delete(entity_id)
 
     if deleted:
+        uow.commit()
         print("Publisher soft delete ile silindi.")
     else:
         print("Publisher silinemedi.")
@@ -178,7 +182,6 @@ Publisher Yonetim Menusu
 
 def main() -> None:
     initialize_database()
-    repository = PublisherRepository()
 
     actions = {
         "1": list_publishers,
@@ -202,7 +205,10 @@ def main() -> None:
             print("Gecersiz secim.")
             continue
 
-        action(repository)
+        # Her menu islemi = bir transaction.
+        # Blok bitince connection kapanir; commit edilmeyen is geri sarilir.
+        with UnitOfWork() as uow:
+            action(uow)
 
 
 if __name__ == "__main__":

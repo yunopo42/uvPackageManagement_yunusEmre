@@ -1,13 +1,14 @@
+import sqlite3
 from uuid import uuid4
 
 from database.connections import get_connection
 from database.initializer import initialize_database
+from database.unit_of_work import UnitOfWork
 from models.publisher import Publisher
-from repositories.publisher_repository import PublisherRepository
 
 
-def create_test_publisher() -> Publisher:
-    test_suffix = uuid4().hex[:8]
+def create_test_publisher(slug_suffix: str | None = None) -> Publisher:
+    test_suffix = slug_suffix or uuid4().hex[:8]
 
     return Publisher(
         name="Iletisim Yayinlari",
@@ -21,6 +22,8 @@ def create_test_publisher() -> Publisher:
 
 
 def verify_with_raw_sql(publisher_id: str) -> None:
+    # Kasten UnitOfWork disinda, ayri bir connection aciyoruz.
+    # Boylece commit'in gercekten diske indigini disaridan dogrulamis oluyoruz.
     connection = get_connection()
 
     try:
@@ -63,22 +66,87 @@ def verify_with_raw_sql(publisher_id: str) -> None:
     print("Aktif mi:", bool(row["is_active"]))
 
 
+def count_publishers_by_slug(slug: str) -> int:
+    connection = get_connection()
+
+    try:
+        row = connection.execute(
+            "SELECT COUNT(*) AS total FROM publishers WHERE slug = ?",
+            (slug,)
+        ).fetchone()
+    finally:
+        connection.close()
+
+    return row["total"]
+
+
+def test_rollback() -> None:
+    # UnitOfWork'un asil isini kanitlayan test:
+    # ayni transaction icinde once basarili bir insert, sonra
+    # UNIQUE slug kisiti yuzunden patlayan bir insert yapiyoruz.
+    # Beklenti: ILK kayit da DB'ye yazilmamis olmali.
+    print("\n--- rollback testi ---")
+
+    first_slug = f"rollback-testi-{uuid4().hex[:8]}"
+    second_slug = f"rollback-testi-{uuid4().hex[:8]}"
+
+    try:
+        with UnitOfWork() as uow:
+            uow.publishers.add(create_test_publisher(first_slug))
+            uow.publishers.add(create_test_publisher(second_slug))
+
+            # Ayni slug ile ucuncu kayit -> UNIQUE kisiti patlar.
+            uow.publishers.add(create_test_publisher(first_slug))
+
+            uow.commit()  # Buraya hic gelinmiyor.
+    except sqlite3.IntegrityError as error:
+        print("Beklenen hata alindi:", error)
+
+    print(
+        "Birinci kayit DB'de mi:",
+        count_publishers_by_slug(first_slug) > 0
+    )
+    print(
+        "Ikinci kayit DB'de mi:",
+        count_publishers_by_slug(second_slug) > 0
+    )
+
+
+def test_commit_unutulursa() -> None:
+    # commit() cagrilmazsa hicbir sey kaydedilmemeli.
+    print("\n--- commit unutulursa testi ---")
+
+    slug = f"commitsiz-{uuid4().hex[:8]}"
+
+    with UnitOfWork() as uow:
+        uow.publishers.add(create_test_publisher(slug))
+        # commit yok
+
+    print(
+        "Kayit DB'de mi:",
+        count_publishers_by_slug(slug) > 0
+    )
+
+
 def main() -> None:
     initialize_database()
     print("Veritabani hazir.")
 
-    repository = PublisherRepository()
-
     # CREATE
-    publisher = create_test_publisher()
-    added_publisher = repository.add(publisher)
+    with UnitOfWork() as uow:
+        publisher = create_test_publisher()
+        added_publisher = uow.publishers.add(publisher)
+        uow.commit()
 
     print("\n--- add() testi ---")
     print("ID:", added_publisher.id)
     print("Ad:", added_publisher.name)
 
-    # READ ONE
-    found_publisher = repository.get_by_id(added_publisher.id)
+    # READ ONE + READ ALL (salt okuma, commit gerekmez)
+    with UnitOfWork() as uow:
+        found_publisher = uow.publishers.get_by_id(added_publisher.id)
+        missing_publisher = uow.publishers.get_by_id("olmayan-id")
+        all_publishers = uow.publishers.get_all()
 
     print("\n--- get_by_id() testi ---")
 
@@ -88,12 +156,7 @@ def main() -> None:
     print("ID:", found_publisher.id)
     print("Ad:", found_publisher.name)
     print("Slug:", found_publisher.slug)
-
-    missing_publisher = repository.get_by_id("olmayan-id")
     print("Olmayan kayit sonucu:", missing_publisher)
-
-    # READ ALL
-    all_publishers = repository.get_all()
 
     print("\n--- get_all() testi ---")
     print("Aktif Publisher sayisi:", len(all_publishers))
@@ -111,7 +174,9 @@ def main() -> None:
     found_publisher.city = "Ankara"
     found_publisher.updated_by = "Yunus Emre Atmaz"
 
-    updated_publisher = repository.update(found_publisher)
+    with UnitOfWork() as uow:
+        updated_publisher = uow.publishers.update(found_publisher)
+        uow.commit()
 
     print("\n--- update() testi ---")
     print("Ad:", updated_publisher.name)
@@ -122,9 +187,10 @@ def main() -> None:
     print("Guncellenme zamani:", updated_publisher.updated_at)
 
     # UPDATE SONRASI TEKRAR OKUMA
-    publisher_after_update = repository.get_by_id(
-        updated_publisher.id
-    )
+    with UnitOfWork() as uow:
+        publisher_after_update = uow.publishers.get_by_id(
+            updated_publisher.id
+        )
 
     print("\n--- update sonrasi get_by_id() testi ---")
 
@@ -138,15 +204,19 @@ def main() -> None:
     verify_with_raw_sql(updated_publisher.id)
 
     # SOFT DELETE
-    count_before_delete = len(repository.get_all())
-    delete_result = repository.delete(updated_publisher.id)
-    count_after_delete = len(repository.get_all())
-    publisher_after_delete = repository.get_by_id(
-        updated_publisher.id
-    )
-    second_delete_result = repository.delete(
-        updated_publisher.id
-    )
+    with UnitOfWork() as uow:
+        count_before_delete = len(uow.publishers.get_all())
+        delete_result = uow.publishers.delete(updated_publisher.id)
+        uow.commit()
+
+        count_after_delete = len(uow.publishers.get_all())
+        publisher_after_delete = uow.publishers.get_by_id(
+            updated_publisher.id
+        )
+        second_delete_result = uow.publishers.delete(
+            updated_publisher.id
+        )
+        uow.commit()
 
     print("\n--- delete() testi ---")
     print("Silme sonucu:", delete_result)
@@ -156,6 +226,10 @@ def main() -> None:
     print("Ikinci silme sonucu:", second_delete_result)
 
     verify_with_raw_sql(updated_publisher.id)
+
+    # UNIT OF WORK TESTLERI
+    test_rollback()
+    test_commit_unutulursa()
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 from models.publisher import Publisher
 from repositories.repository import IRepository
-from database.connections import get_connection
 import sqlite3
 from datetime import datetime , timezone
 
 class PublisherRepository(IRepository[Publisher]):
+    # Bağlantı IRepository.__init__ üzerinden Unit of Work tarafından verilir.
 
     def get_all(self) -> list[Publisher]:
         sql = """
@@ -14,12 +14,7 @@ class PublisherRepository(IRepository[Publisher]):
         ORDER BY created_at DESC
         """
 
-        connection = get_connection()
-
-        try:
-            rows = connection.execute(sql).fetchall()
-        finally:
-            connection.close()
+        rows = self._connection.execute(sql).fetchall()
 
         publishers = []
 
@@ -37,15 +32,10 @@ class PublisherRepository(IRepository[Publisher]):
             AND is_deleted = 0
         """
 
-        connection = get_connection()
-
-        try:
-            row = connection.execute(
-                sql,
-                (entity_id,)
-            ).fetchone()
-        finally:
-            connection.close()
+        row = self._connection.execute(
+            sql,
+            (entity_id,)
+        ).fetchone()
 
         if row is None:
             return None
@@ -127,18 +117,9 @@ class PublisherRepository(IRepository[Publisher]):
             "is_active": int(entity.is_active)
         }
 
-        connection = get_connection()
+        self._connection.execute(sql, parameters)
 
-        try:
-            connection.execute(sql, parameters)
-            connection.commit()
-
-            return entity
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        return entity
 
     def update(self, entity : Publisher) -> Publisher:
         if entity.updated_by is None:
@@ -188,26 +169,19 @@ class PublisherRepository(IRepository[Publisher]):
             "row_version": entity.row_version
         }
 
-        connection = get_connection()
+        cursor = self._connection.execute(sql, parameters)
 
-        try:
-            cursor = connection.execute(sql, parameters)
+        if cursor.rowcount == 0:
+            # Rollback'i burada yapmıyoruz; hatayı fırlatmak repository'nin,
+            # transaction'ı geri sarmak Unit of Work'un işi.
+            raise ValueError(
+                "Publisher bulunamadı, silinmiş veya "
+                "başka bir işlem tarafından güncellenmiş."
+            )
 
-            if cursor.rowcount == 0:
-                connection.rollback()
-
-                raise ValueError(
-                    "Publisher bulunamadı, silinmiş veya "
-                    "başka bir işlem tarafından güncellenmiş."
-                )
-
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
-
+        # DİKKAT: Bu iki satır artık commit'ten ÖNCE çalışıyor.
+        # Aynı transaction içindeki ikinci bir update için doğru davranış,
+        # ama rollback olursa bellekteki nesne DB ile uyumsuz kalır.
         entity.updated_at = updated_at
         entity.row_version += 1
 
@@ -233,18 +207,9 @@ class PublisherRepository(IRepository[Publisher]):
             "updated_at": deleted_at.isoformat()
         }
 
-        connection = get_connection()
+        cursor = self._connection.execute(sql, parameters)
 
-        try:
-            cursor = connection.execute(sql, parameters)
-            connection.commit()
-
-            return cursor.rowcount == 1
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        return cursor.rowcount == 1
 
     @staticmethod
     def _row_to_publisher(row: sqlite3.Row) -> Publisher:
